@@ -1,0 +1,14 @@
+## Org List
+
+### R
+- Move data QC and filtering into its own file
+- transfer data imputation from python to R and confirm the results are the same
+- Create demographic table similar to Aura's in the AD paper - use t-test for categorical and chisquare for cont. 
+- QC data parsing pipeline 
+- Move plot generation into its own file 
+- QC plot generation (add some buffer space over the box plots for stats)
+- double check that the t-test features are removed from the anova
+- Confirm package versions and make into its own R project
+### Python
+- Clean up the ML code
+- Double check on the validation notes 
