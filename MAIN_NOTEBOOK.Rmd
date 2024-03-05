@@ -1,0 +1,196 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(ibdplexus)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(OlinkAnalyze)
+library(data.table)
+library(lmerTest)
+library(lme4)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(ggrepel)
+library(forcats)
+library(ggsci)
+library(RColorBrewer)
+library(optimx)
+library(minqa)
+library(dfoptim)
+library(survey)
+library(scales)
+library(ggnewscale)
+library(ggpubr)
+library(gplots)
+library(psych)
+library(MuMIn)
+library(ggfortify)
+
+cur.date <- format(Sys.Date(), "%y%m%d")
+output_path <- (paste0("outputs/", cur.date, "/", cur.date))
+
+withWarnings <- function(expr) {
+  myWarnings <- NULL
+  wHandler <- function(w) {
+    myWarnings <<- c(myWarnings, list(w))
+    invokeRestart("muffleWarning")
+  }
+  val <- withCallingHandlers(expr, warning = wHandler)
+  list(value = val, warnings = myWarnings)
+} 
+set.seed(42)
+```
+
+```{r}
+#This cell will take a whil to run!
+# Read in the metadata and filter out non proteomic samples, non UC/CD samples, and keep only the first time point
+omics_df <- read_xlsx("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/2023-08-02-SPARC_SUMMARY_OMICS.xlsx") %>% filter(STUDY_PROTOCOL_NAME == "Proteomic") %>% filter(DIAGNOSIS != "IBD Unclassified") %>%  group_by(DEIDENTIFIED_MASTER_PATIENT_ID) %>% filter(SAMPLE_COLLECTED_DATE == min(SAMPLE_COLLECTED_DATE))
+
+
+
+
+#Check to make sure no file names are reused 
+print(TRUE %in% duplicated(omics_df$RAW_DATA_FILE_NAME))
+#Check to see if patient ID's are reused (since there are multiple samples per patient)
+print(TRUE %in% duplicated(omics_df$DEIDENTIFIED_MASTER_PATIENT_ID))
+#Check to see if these columns are interchangeable 
+print(all(omics_df$RAW_DATA_FILE_NAME == omics_df$REQUESTED_FILE_NAME))
+print(all(omics_df$DATE_OF_CONSENT == omics_df$DATE_OF_CONSENT_1))
+
+
+## Read in Proteomics data 
+NPX_data <- read_NPX(filename ="/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/data/20211937_Dobes_NPX_2022-06-07/20211937_Dobes_NPX_2022-06-07.csv")
+
+
+NPX_qc <- NPX_data %>% dplyr::filter(QC_Warning=="PASS") %>% dplyr::filter(Assay_Warning=="PASS")%>% filter(!grepl("control", SampleID, ignore.case = TRUE))
+
+
+merged_NPX <- merge(NPX_qc, omics_df, by.x="SampleID", by.y="REQUESTED_FILE_NAME")
+
+
+
+ttest_results_NPX1 <- olink_ttest(df = merged_NPX,
+                variable = "DIAGNOSIS")
+ttest_sign_NPX1 <- ttest_results_NPX1 %>%
+    head(n=10) %>%
+    pull(OlinkID)
+t <- olink_volcano_plot(p.val_tbl = ttest_results_NPX1,
+                olinkid_list = ttest_sign_NPX1) 
+
+# Create a wide DF of the NPX df to merge on the SampleID column (REQUESTED FILE NAME in the omics DF)
+wide_NPX <- NPX_qc %>% select(SampleID, UniProt, NPX) %>% dcast(SampleID ~ UniProt, value.var = "NPX", fun.aggregate = mean)
+
+
+
+
+## Create the DF used for downstram machine learning, this DF should only have the first time point for each patient 
+linear_model_df <- omics_df %>% select(REQUESTED_FILE_NAME, SEX, DIAGNOSIS, DISEASE_ACTIVITY_60, SAMPLE_COLLECTED_DATE, BIRTH_YEAR) %>% merge(., wide_NPX, by.y="SampleID", by.x="REQUESTED_FILE_NAME") %>% mutate(Age=SAMPLE_COLLECTED_DATE-BIRTH_YEAR)
+```
+
+
+
+```{r}
+ #Acadia = list(c("#212E52", "#444E7E", "#8087AA", "#B7ABBC", "#F9ECE8", "#FCC893", "#FEB424", "#FD8700", "#D8511D"), c(1, 2, 3, 4, 5, 6, 7, 8, 9), colorblind=TRUE),
+#I was dumb and did all the imputation in python and im too lazy to fix it  
+linear_model_df <- read.csv("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231019_linear_model_features.csv")
+linear_model_df$DIAGNOSIS <- as.factor(linear_model_df$DIAGNOSIS)
+
+
+
+
+
+
+
+
+  disease_color <- c("#FEB424", "#8087AA")
+disease_activity_color <- c("#F9ECE8", "#FCC893", "#FD8700", "#D8511D")
+
+  
+pca_res_base <- linear_model_df %>% select(-c(REQUESTED_FILE_NAME, DEIDENTIFIED_MASTER_PATIENT_ID, SAMPLE_COLLECTED_DATE, BIRTH_YEAR, DIAGNOSIS, Age, SEX))%>% prcomp(., scale. = FALSE)
+
+
+plot_base <- autoplot(pca_res_base, data = linear_model_df, colour = 'DIAGNOSIS')+theme_bw() +
+  ggside::geom_xsidedensity(aes(fill = DIAGNOSIS,), alpha = 0.5, show.legend = FALSE) +
+  ggside::geom_ysidedensity(aes(fill = DIAGNOSIS), alpha = 0.5, show.legend = FALSE) +
+  ggside::theme_ggside_void()+stat_ellipse(aes(color = DIAGNOSIS)) + scale_fill_manual(values=disease_color)+scale_color_manual(values=disease_color)
+
+  pca_res_filtered <- linear_model_df %>% select(-c(REQUESTED_FILE_NAME, DEIDENTIFIED_MASTER_PATIENT_ID, SAMPLE_COLLECTED_DATE, BIRTH_YEAR, DIAGNOSIS)) %>% select(c(Q9Y5Q6, P29460, O95750, P29459_P29460, P16422, P35228, Q99795, P04196, Q02747, P10144, P22455, P09238, Q9Y6Y9))%>% prcomp(., scale. = FALSE)
+
+plot_filtered <- autoplot(pca_res_filtered, data = linear_model_df, colour = 'DIAGNOSIS')+theme_bw() +
+  ggside::geom_xsidedensity(aes(fill = DIAGNOSIS,), alpha = 0.5, show.legend = FALSE) +
+  ggside::geom_ysidedensity(aes(fill = DIAGNOSIS), alpha = 0.5, show.legend = FALSE) +
+  ggside::theme_ggside_void()+stat_ellipse(aes(color = DIAGNOSIS)) + scale_fill_manual(values=disease_color)+scale_color_manual(values=disease_color)
+
+
+
+
+
+
+ggsave(filename=paste0(output_path, "_pca_base.png"), plot=plot_base, height=7, width=7)
+ggsave(filename=paste0(output_path, "_pca_filtered.png"), plot=plot_filtered, height=7, width=7)
+
+
+
+
+
+
+
+
+
+```
+```{r}
+linear_model_df <- read.csv("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231019_linear_model_features.csv")
+
+
+linear_model_df <- linear_model_df %>% select(Age, DISEASE_ACTIVITY_60, BIRTH_YEAR, SAMPLE_COLLECTED_DATE, everything()) %>% select(Age, DISEASE_ACTIVITY_60, BIRTH_YEAR, SAMPLE_COLLECTED_DATE, everything())
+
+
+ggsave(plot=plot_base)
+
+
+attach(linear_model_df)
+
+First <- 9
+Last <- 2928
+Beta <- NULL
+STE <- NULL
+Area <- NULL
+Pval <- NULL
+i <-  NULL
+Warn <- NULL
+Results <- NULL
+Sigs <- NULL
+LMEOut <- NULL
+a <- NULL
+for (i in First:Last) {
+  print(i)
+  LMEOut <- withWarnings( a <- glmer(DIAGNOSIS ~  linear_model_df[,i] + Age + SEX + (1|DISEASE_ACTIVITY_60), family = "binomial", nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=1e5))))
+  Beta[i] <- summary(a)$`coefficients`[2]
+  STE[i] <- summary(a)$`coefficients`[2,2]
+  Pval[i] <-  summary(a)$`coefficients`[2,4]
+  Area[i] <- colnames(linear_model_df)[i]
+  Warn[i] <- LMEOut$warnings
+}
+#Store results in a dataframe
+Results <- cbind.data.frame(Area[First:length(Area)], Beta[First:length(Beta)], STE[First:length(STE)], Pval[First:length(Pval)])
+#Relabel Results
+colnames(Results) <- c("Variable", "Beta", "STE", "Pval")
+
+# merge
+# 2 tiers of FDR correction
+Results$FDR <- p.adjust(Results$Pval, method="fdr")
+Results$Bonferroni <- p.adjust(Results$Pval, method = "bonferroni")
+#Write out results
+#fwrite(Results, "/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231027_cd_uc_linear_nostatus.csv")
+
+
+```
+
+

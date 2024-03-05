@@ -1,0 +1,190 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+TODO:
+- Filter out unclassified IBD
+- 
+
+```{r}
+library(ibdplexus)
+library(tidyverse)
+library(stringr)
+library(readxl)
+library(OlinkAnalyze)
+
+library(data.table)
+library(lmerTest)
+library(lme4)
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(ggrepel)
+library(forcats)
+library(ggsci)
+library(RColorBrewer)
+library(optimx)
+library(minqa)
+library(dfoptim)
+library(survey)
+library(scales)
+library(ggnewscale)
+library(ggpubr)
+library(gplots)
+library(psych)
+library(MuMIn)
+
+withWarnings <- function(expr) {
+  myWarnings <- NULL
+  wHandler <- function(w) {
+    myWarnings <<- c(myWarnings, list(w))
+    invokeRestart("muffleWarning")
+  }
+  val <- withCallingHandlers(expr, warning = wHandler)
+  list(value = val, warnings = myWarnings)
+} 
+set.seed(42)
+
+
+
+
+
+
+
+omics_df <- read_xlsx("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/2023-08-02-SPARC_SUMMARY_OMICS.xlsx") %>% filter(STUDY_PROTOCOL_NAME == "Proteomic") %>% filter(DIAGNOSIS != "IBD Unclassified") %>%  group_by(DEIDENTIFIED_MASTER_PATIENT_ID) %>% filter(SAMPLE_COLLECTED_DATE == min(SAMPLE_COLLECTED_DATE))
+
+
+
+
+#Check to make sure no file names are reused 
+print(TRUE %in% duplicated(omics_df$RAW_DATA_FILE_NAME))
+#Check to see if patient ID's are reused (multiple samples )
+print(TRUE %in% duplicated(omics_df$DEIDENTIFIED_MASTER_PATIENT_ID))
+#Check to se if these columns are interchangeable 
+print(all(omics_df$RAW_DATA_FILE_NAME == omics_df$REQUESTED_FILE_NAME))
+print(all(omics_df$DATE_OF_CONSENT == omics_df$DATE_OF_CONSENT_1))
+
+NPX_data <- read_NPX(filename ="/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/data/20211937_Dobes_NPX_2022-06-07/20211937_Dobes_NPX_2022-06-07.csv")
+
+
+NPX_qc <- NPX_data %>% dplyr::filter(QC_Warning=="PASS") %>% dplyr::filter(Assay_Warning=="PASS")%>% filter(!grepl("control", SampleID, ignore.case = TRUE))
+
+
+# Create a wide DF of the NPX df to merge on the SampleID column (REQUESTED FILE NAME in the omics DF)
+wide_NPX <- NPX_qc %>% select(SampleID, UniProt, NPX) %>% dcast(SampleID ~ UniProt, value.var = "NPX", fun.aggregate = mean)
+
+linear_model_df <- omics_df %>% select(REQUESTED_FILE_NAME, SEX, DIAGNOSIS, DISEASE_ACTIVITY_60, SAMPLE_COLLECTED_DATE, BIRTH_YEAR) %>% merge(., wide_NPX, by.y="SampleID", by.x="REQUESTED_FILE_NAME")
+
+
+merged_NPX <- merge(NPX_qc, omics_df, by.x="SampleID", by.y="REQUESTED_FILE_NAME")
+
+
+
+ttest_results_NPX1 <- olink_ttest(df = merged_NPX,
+                variable = "DIAGNOSIS")
+ttest_sign_NPX1 <- ttest_results_NPX1 %>%
+    head(n=10) %>%
+    pull(OlinkID)
+t <- olink_volcano_plot(p.val_tbl = ttest_results_NPX1,
+                olinkid_list = ttest_sign_NPX1) +
+  scale_color_manual(values = c('turquoise3', 'red'))
+#ggsave("~/temp.png", t, dpi=600)
+
+#write.csv(ttest_results_NPX1, "~/231008_ttest_expanded_data.csv")
+```
+
+```{r}
+
+
+
+#linear_model_df <- read.csv("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231019_linear_model_features.csv") %>% select(Age, DISEASE_ACTIVITY_60, BIRTH_YEAR, SAMPLE_COLLECTED_DATE, everything())
+
+linear_model_df <- linear_model_df %>% select(Age, DISEASE_ACTIVITY_60, BIRTH_YEAR, SAMPLE_COLLECTED_DATE, everything())
+attach(linear_model_df)
+
+First <- 9
+Last <- 2928
+Beta <- NULL
+STE <- NULL
+Area <- NULL
+Pval <- NULL
+i <-  NULL
+Warn <- NULL
+Results <- NULL
+Sigs <- NULL
+LMEOut <- NULL
+a <- NULL
+for (i in First:Last) {
+  print(i)
+  LMEOut <- withWarnings( a <- glmer(DIAGNOSIS ~  linear_model_df[,i] + Age + SEX, family = "binomial", nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=1e5))))
+  Beta[i] <- summary(a)$`coefficients`[2]
+  STE[i] <- summary(a)$`coefficients`[2,2]
+  Pval[i] <-  summary(a)$`coefficients`[2,4]
+  Area[i] <- colnames(linear_model_df)[i]
+  Warn[i] <- LMEOut$warnings
+}
+#Store results in a dataframe
+Results <- cbind.data.frame(Area[First:length(Area)], Beta[First:length(Beta)], STE[First:length(STE)], Pval[First:length(Pval)])
+#Relabel Results
+colnames(Results) <- c("Variable", "Beta", "STE", "Pval")
+
+# merge
+# 2 tiers of FDR correction
+Results$FDR <- p.adjust(Results$Pval, method="fdr")
+Results$Bonferroni <- p.adjust(Results$Pval, method = "bonferroni")
+#Write out results
+fwrite(Results, "/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231027_cd_uc_linear_nostatus.csv")
+
+```
+
+```{r}
+
+withWarnings <- function(expr) {
+  myWarnings <- NULL
+  wHandler <- function(w) {
+    myWarnings <<- c(myWarnings, list(w))
+    invokeRestart("muffleWarning")
+  }
+  val <- withCallingHandlers(expr, warning = wHandler)
+  list(value = val, warnings = myWarnings)
+} 
+
+
+linear_model_df <- read.csv("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231015_linear_models_df.csv") %>% select(Age, DISEASE_ACTIVITY_60, BIRTH_YEAR, SAMPLE_COLLECTED_DATE, everything())
+attach(linear_model_df)
+
+First <- 9
+Last <- 2928
+Beta <- NULL
+STE <- NULL
+Area <- NULL
+Pval <- NULL
+i <-  NULL
+Warn <- NULL
+Results <- NULL
+Sigs <- NULL
+LMEOut <- NULL
+a <- NULL
+for (i in First:Last) {
+  print(i)
+  LMEOut <- withWarnings( a <- glmer(DIAGNOSIS ~  linear_model_df[,i] + Age + SEX + (1|DISEASE_ACTIVITY_60), family = "binomial", nAGQ = 0, control = glmerControl(optimizer = "bobyqa", optCtrl=list(maxfun=1e5))))
+  Beta[i] <- summary(a)$`coefficients`[2]
+  STE[i] <- summary(a)$`coefficients`[2,2]
+  Pval[i] <-  summary(a)$`coefficients`[2,4]
+  Area[i] <- colnames(linear_model_df)[i]
+  Warn[i] <- LMEOut$warnings
+}
+#Store results in a dataframe
+Results <- cbind.data.frame(Area[First:length(Area)], Beta[First:length(Beta)], STE[First:length(STE)], Pval[First:length(Pval)])
+#Relabel Results
+colnames(Results) <- c("Variable", "Beta", "STE", "Pval")
+
+# merge
+# 2 tiers of FDR correction
+Results$FDR <- p.adjust(Results$Pval, method="fdr")
+Results$Bonferroni <- p.adjust(Results$Pval, method = "bonferroni")
+#Write out results
+fwrite(Results, "/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231015_cd_uc_linear_no_diseaseactivity.csv")
+```
+
