@@ -1,0 +1,22 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+library(dplyr)
+
+
+df <- read.csv("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/sparc_dataset/231015_linear_model_features_encoded_features.csv") %>% select(!c(`X`)) 
+
+
+age_ttest <- df %>%
+  summarise(p_value = t.test(Age~DIAGNOSIS)$p.value)
+
+cont_table_sex <- chisq.test(x =table(df$DIAGNOSIS, df$SEX))
+cont_table_disease_sev <- chisq.test(x =table(df$DIAGNOSIS, df$DISEASE_ACTIVITY_60))
+```
+
+
