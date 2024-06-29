@@ -109,13 +109,11 @@ linear_model_df$DIAGNOSIS <- as.factor(linear_model_df$DIAGNOSIS)
 
 
 
-  disease_color <- c("#FEB424", "#8087AA")
+disease_color <- c("#FEB424", "#8087AA")
 disease_activity_color <- c("#F9ECE8", "#FCC893", "#FD8700", "#D8511D")
 #### PCA plots used in figure 
 
 pca_res_base <- linear_model_df %>% select(-c(REQUESTED_FILE_NAME, DEIDENTIFIED_MASTER_PATIENT_ID, SAMPLE_COLLECTED_DATE, BIRTH_YEAR, DIAGNOSIS, Age, SEX))%>% prcomp(., scale. = FALSE)
-
-
 
 
 plot_base <- autoplot(pca_res_base, data = linear_model_df, colour = 'DIAGNOSIS')+theme_bw() +
@@ -151,7 +149,18 @@ filtered_coordinates <- plot_filtered$data
   axis1.test.filt <- p.adjust(t.test(Coord1 ~ Group, data=df_filt)$p.value, method = "BH")
   axis2.test.filt <- p.adjust(t.test(Coord2 ~ Group, data=df_filt)$p.value, method = "BH")
 
+  
+### anosim analysis 
+library(vegan)
+whole_proteome <- linear_model_df %>% select(-c(REQUESTED_FILE_NAME, DEIDENTIFIED_MASTER_PATIENT_ID, SAMPLE_COLLECTED_DATE, BIRTH_YEAR, Age, SEX)) 
 
+
+whole_proteome <- sapply( whole_proteome, as.numeric ) %>% as.data.frame()
+anosim(whole_proteome, grouping = whole_proteome$DIAGNOSIS, distance="euclidian", parallel=8, permutations = 999)
+
+subset_proteome <- linear_model_df %>% select(-c(REQUESTED_FILE_NAME, DEIDENTIFIED_MASTER_PATIENT_ID, SAMPLE_COLLECTED_DATE, BIRTH_YEAR)) %>% select(c(Q9Y5Q6, P29460, O95750, P29459_P29460, P16422, P35228, Q99795, P04196, Q02747, P10144, P22455, P09238, Q9Y6Y9, DIAGNOSIS))
+subset_proteome <- sapply( subset_proteome, as.numeric ) %>% as.data.frame()
+anosim(subset_proteome, grouping = subset_proteome$DIAGNOSIS, distance="euclidian", , parallel=8, permutations = 999)
 #### Protein level plots by disease and stats
 scatter_plots <- linear_model_df %>% select(c(DIAGNOSIS, Q9Y5Q6, P29460, O95750, P29459_P29460, P16422, P35228, Q99795, P04196, Q02747, P10144, P22455, P09238, Q9Y6Y9)) %>% melt(id.vars = "DIAGNOSIS") %>% ggplot(., aes(x=DIAGNOSIS, y=value, color=DIAGNOSIS)) + geom_point(position = "jitter", size=.5) +scale_color_manual(values=disease_color)+stat_summary(fun="mean",geom="crossbar", mapping=aes(ymin=..y.., ymax=..y..), 
      width=1, position=position_dodge(),show.legend = FALSE, colour = "black", linewidth=.25)  + facet_wrap(~variable)+ theme_minimal()

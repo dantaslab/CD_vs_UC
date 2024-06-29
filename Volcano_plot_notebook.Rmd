@@ -14,8 +14,9 @@ GWAS_cutoff <- read_xlsx("/Users/mark/Library/CloudStorage/Box-Box/Projects/Croh
   TRUE ~ 'Not Significant'
 )) %>% mutate(scaled_pvalue = -log10(Pval))
 
-volcano_plot <- GWAS_cutoff %>% ggplot(aes(x=`Beta`, y=`scaled_pvalue`, label=Name)) + geom_point(aes(color=cutoff_type), size=.8)+ scale_color_brewer(palette="Dark2")+geom_text(hjust=.5, vjust=-.5, size=2.1)+ylab("-Log10 P")
+volcano_plot <- GWAS_cutoff %>% ggplot(aes(x=`Beta`, y=`scaled_pvalue`, label=Name)) + geom_point(aes(color=cutoff_type), size=.8)+ scale_color_brewer(palette="Dark2")+geom_text(hjust=.5, vjust=-.5, size= 3.1)+ylab("-Log10 P")+theme_bw()
 volcano_plot
+ggsave("/Users/mark/Library/CloudStorage/Box-Box/Projects/Crohns/240524_volcano_v1_MG.png", dpi=900, height = 6, width = 10)
 ```
 
 
